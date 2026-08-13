@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 BOT_TOKEN = "8975094107:AAHAyExCPty9LsFavS1u2b31Od4sGYbrNkg"
 ADMIN_IDS = [1462367346, 8785617232]
-CREATOR_ID = 1462367346
+CREATOR_ID = 1462367346  # @PD777DP
 
 conn = sqlite3.connect("attendance.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -18,7 +18,8 @@ cursor.execute("CREATE TABLE IF NOT EXISTS fines (id INTEGER PRIMARY KEY AUTOINC
 cursor.execute("CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY, username TEXT)")
 conn.commit()
 
-cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)", (CREATOR_ID, "PD777DP", "Архитектор"))
+# Добавляем создателя (виджет @PD777DP)
+cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)", (CREATOR_ID, "PD777DP", "виджет"))
 cursor.execute("INSERT OR IGNORE INTO admins (user_id, username) VALUES (?, ?)", (CREATOR_ID, "PD777DP"))
 for uid in ADMIN_IDS:
     cursor.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (uid,))
@@ -29,6 +30,9 @@ def is_admin(user_id):
         return True
     cursor.execute("SELECT user_id FROM admins WHERE user_id = ?", (user_id,))
     return cursor.fetchone() is not None
+
+def is_creator(user_id):
+    return user_id == CREATOR_ID
 
 def send(chat_id, text, kb=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -60,6 +64,14 @@ def add_fine(user_id, username, first_name, amount, reason):
 def pay_fine(fine_id):
     cursor.execute("UPDATE fines SET paid = 1 WHERE id = ?", (fine_id,))
     conn.commit()
+
+def delete_fine(fine_id):
+    cursor.execute("DELETE FROM fines WHERE id = ?", (fine_id,))
+    conn.commit()
+
+def get_user_fines(user_id):
+    cursor.execute("SELECT id, amount, reason, date, paid FROM fines WHERE user_id = ? ORDER BY date DESC", (user_id,))
+    return cursor.fetchall()
 
 def get_fines_by_user(user_id):
     cursor.execute("SELECT id, amount, reason, date, paid FROM fines WHERE user_id = ? AND paid = 0 ORDER BY date DESC", (user_id,))
@@ -318,6 +330,15 @@ def handle(update):
                 state[uid]["mass_pay_names"] = names
                 send(cid, f"✅ Найдено {len(names)} имён\n\n📌 <b>ВЫБЕРИ ПУНКТ ДЛЯ ОПЛАТЫ:</b>", fine_punkt_menu())
                 return
+            
+            # ===== НАЗНАЧЕНИЕ ШТРАФА - ВВОД ИМЕНИ =====
+            if uid in state and state[uid].get("step") == "fine_name":
+                if not is_admin(uid):
+                    send(cid, "⛔ Только админ!")
+                    return
+                state[uid]["fine_name"] = t.strip()
+                send(cid, f"👤 <b>{t}</b>\n\n📌 <b>ВЫБЕРИ ПУНКТ ШТРАФА:</b>", fine_punkt_menu())
+                return
     
     if "callback_query" in update:
         c = update["callback_query"]
@@ -375,7 +396,7 @@ def handle(update):
         
         if data == "mass_fine":
             state[uid] = {"step": "mass_fine_names"}
-            send(cid, "📋 <b>МАССОВЫЙ ШТРАФ</b>\n\nВведи список имён через запятую:\n\nПример:\nволк228, LetV4k, Зумрай, виджет")
+            send(cid, "📋 <b>МАССОВЫЙ ШТРАФ</b>\n\nВведи список имён через запятую:")
             return
         
         if data == "mass_pay":
@@ -383,12 +404,12 @@ def handle(update):
             send(cid, "✅ <b>МАССОВАЯ ОПЛАТА</b>\n\nВведи список имён через запятую:")
             return
         
-        # Обработка выбора пункта для массового штрафа
+        # Обработка выбора пункта
         if data.startswith("fine_punkt_"):
             punkt_num = int(data.split("_")[2])
             punkt_info = get_punkt_info(punkt_num)
             
-            # Проверяем, откуда пришли (массовый штраф или массовая оплата)
+            # Массовый штраф
             if "mass_names" in state.get(uid, {}):
                 names = state[uid]["mass_names"]
                 count = 0
@@ -397,7 +418,7 @@ def handle(update):
                     r = cursor.fetchone()
                     if r:
                         user_id, username_db, first_name, missed = r
-                        if punkt_num == 2:  # Пункт 2 — пропуск сбора
+                        if punkt_num == 2:
                             amount = 5 + (missed * 10)
                             reason = f"Пункт 2: Пропуск сбора (пропусков: {missed + 1})"
                         else:
@@ -561,4 +582,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
