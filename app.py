@@ -2,7 +2,7 @@ import requests
 import json
 import sqlite3
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 BOT_TOKEN = "8975094107:AAHAyExCPty9LsFavS1u2b31Od4sGYbrNkg"
 ADMIN_IDS = [1462367346, 8785617232]
@@ -13,7 +13,7 @@ cursor = conn.cursor()
 
 cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, last_seen TEXT, warnings INTEGER DEFAULT 0, missed_gatherings INTEGER DEFAULT 0)")
 cursor.execute("CREATE TABLE IF NOT EXISTS attendance (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, present TEXT, absent TEXT, fines TEXT)")
-cursor.execute("CREATE TABLE IF NOT EXISTS fines (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, first_name TEXT, amount INTEGER, reason TEXT, date TEXT, paid INTEGER DEFAULT 0)")
+cursor.execute("CREATE TABLE IF NOT EXISTS fines (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, first_name TEXT, amount INTEGER, reason TEXT, date TEXT, paid INTEGER DEFAULT 0, overdue INTEGER DEFAULT 0)")
 cursor.execute("CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY, username TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS warnings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, reason TEXT, date TEXT, type TEXT)")
 conn.commit()
@@ -51,11 +51,11 @@ def get_members():
 
 def add_fine(user_id, username, first_name, amount, reason):
     try:
-        cursor.execute("INSERT INTO fines (user_id, username, first_name, amount, reason, date, paid) VALUES (?, ?, ?, ?, ?, ?, ?)", 
-                       (user_id, username, first_name, amount, reason, datetime.now().strftime("%d.%m.%Y %H:%M"), 0))
+        cursor.execute("INSERT INTO fines (user_id, username, first_name, amount, reason, date, paid, overdue) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
+                       (user_id, username, first_name, amount, reason, datetime.now().strftime("%d.%m.%Y %H:%M"), 0, 0))
         conn.commit()
         fine_id = cursor.lastrowid
-        send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!")
         return fine_id
     except:
         return None
@@ -76,16 +76,12 @@ def pay_fine(fine_id):
         return False
 
 def get_fines_by_user(user_id):
-    cursor.execute("SELECT id, amount, reason, date, paid FROM fines WHERE user_id = ? ORDER BY date DESC", (user_id,))
+    cursor.execute("SELECT id, amount, reason, date, paid, overdue FROM fines WHERE user_id = ? ORDER BY date DESC", (user_id,))
     return cursor.fetchall()
 
 def get_unpaid_fines_by_user(user_id):
-    cursor.execute("SELECT id, amount, reason, date FROM fines WHERE user_id = ? AND paid = 0 ORDER BY date DESC", (user_id,))
+    cursor.execute("SELECT id, amount, reason, date, overdue FROM fines WHERE user_id = ? AND paid = 0 ORDER BY date DESC", (user_id,))
     return cursor.fetchall()
-
-def update_missed_gatherings(user_id):
-    cursor.execute("UPDATE users SET missed_gatherings = missed_gatherings + 1 WHERE user_id = ?", (user_id,))
-    conn.commit()
 
 def get_missed_gatherings(user_id):
     cursor.execute("SELECT missed_gatherings FROM users WHERE user_id = ?", (user_id,))
@@ -117,6 +113,27 @@ def remove_admin(user_id):
 def get_admins():
     cursor.execute("SELECT user_id, username FROM admins")
     return cursor.fetchall()
+
+def check_overdue_fines():
+    cursor.execute("SELECT id, user_id, amount, date FROM fines WHERE paid = 0")
+    fines = cursor.fetchall()
+    now = datetime.now()
+    for fine_id, user_id, amount, date_str in fines:
+        fine_date = datetime.strptime(date_str, "%d.%m.%Y %H:%M")
+        days_passed = (now - fine_date).days
+        if days_passed >= 2:
+            overdue_count = (days_passed - 1) // 2
+            cursor.execute("SELECT overdue FROM fines WHERE id = ?", (fine_id,))
+            current_overdue = cursor.fetchone()[0]
+            if overdue_count > current_overdue:
+                new_overdue = overdue_count
+                extra_amount = new_overdue * 10
+                cursor.execute("UPDATE fines SET amount = amount + ?, overdue = ? WHERE id = ?", (extra_amount, new_overdue, fine_id))
+                conn.commit()
+                cursor.execute("SELECT user_id, username, first_name FROM users WHERE user_id = ?", (user_id,))
+                user = cursor.fetchone()
+                if user:
+                    send(user_id, f"⏰ <b>ПРОСРОЧКА ШТРАФА!</b>\n\n💰 Штраф #{fine_id} просрочен!\n➕ Начислено {extra_amount} г за просрочку\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}")
 
 state = {}
 
@@ -186,26 +203,52 @@ def critical_fines_menu():
         [{"text": "🔙 Назад", "callback_data": "back_categories"}]
     ]}
 
-def get_punkt_info(punkt_num):
+def fine_9_submenu():
+    return {"inline_keyboard": [
+        [{"text": "🟡 Лёгкие (5-10 г)", "callback_data": "fine_9_1"}],
+        [{"text": "🟠 Средние (15-20 г)", "callback_data": "fine_9_2"}],
+        [{"text": "🔴 Тяжёлые (25-50 г)", "callback_data": "fine_9_3"}],
+        [{"text": "🔙 Назад", "callback_data": "back_medium"}]
+    ]}
+
+def fine_10_submenu():
+    return {"inline_keyboard": [
+        [{"text": "🟢 Незначительное (3-5 г)", "callback_data": "fine_10_1"}],
+        [{"text": "🟡 Среднее (10-15 г)", "callback_data": "fine_10_2"}],
+        [{"text": "🔴 Грубое (20-30 г)", "callback_data": "fine_10_3"}],
+        [{"text": "🔙 Назад", "callback_data": "back_medium"}]
+    ]}
+
+def get_punkt_info(punkt_num, sub_num=0):
     punkte = {
-        1: {"name": "Убийство союзника", "base": 5, "emoji": "1️⃣"},
-        2: {"name": "Пропуск сбора", "base": 5, "emoji": "2️⃣"},
-        3: {"name": "Спам в чате", "base": 5, "emoji": "3️⃣"},
-        4: {"name": "Самовольный захват базы", "base": 10, "emoji": "4️⃣"},
-        5: {"name": "Неявка на защиту базы", "base": 10, "emoji": "5️⃣"},
-        6: {"name": "Неявка на босса", "base": 10, "emoji": "6️⃣"},
-        7: {"name": "Неактивность 4+ дней", "base": 15, "emoji": "7️⃣"},
-        8: {"name": "Выход во время строя", "base": 15, "emoji": "8️⃣"},
-        9: {"name": "Оскорбления", "base": 10, "emoji": "9️⃣"},
-        10: {"name": "Нарушение в строю", "base": 5, "emoji": "🔟"},
-        11: {"name": "Оскорбление руководства", "base": 50, "emoji": "1️⃣1️⃣"},
-        12: {"name": "Продажа экипировки из казны", "base": 50, "emoji": "1️⃣2️⃣"},
-        13: {"name": "Провокация войны", "base": 50, "emoji": "1️⃣3️⃣"},
-        14: {"name": "Умышленное убийство союзника", "base": 50, "emoji": "1️⃣4️⃣"},
-        15: {"name": "Шпионство/слив данных", "base": 0, "emoji": "1️⃣5️⃣"},
-        16: {"name": "Скам игрока", "base": 0, "emoji": "1️⃣6️⃣"}
+        1: {"name": "Убийство союзника", "base": 5, "emoji": "1️⃣", "range": None},
+        2: {"name": "Пропуск сбора", "base": 5, "emoji": "2️⃣", "range": None},
+        3: {"name": "Спам в чате", "base": 5, "emoji": "3️⃣", "range": None},
+        4: {"name": "Самовольный захват базы", "base": 10, "emoji": "4️⃣", "range": None},
+        5: {"name": "Неявка на защиту базы", "base": 10, "emoji": "5️⃣", "range": None},
+        6: {"name": "Неявка на босса", "base": 10, "emoji": "6️⃣", "range": None},
+        7: {"name": "Неактивность 4+ дней", "base": 15, "emoji": "7️⃣", "range": None},
+        8: {"name": "Выход во время строя", "base": 15, "emoji": "8️⃣", "range": None},
+        9: {
+            1: {"name": "Оскорбления (лёгкие)", "base": 7, "emoji": "🟡", "range": (5, 10)},
+            2: {"name": "Оскорбления (средние)", "base": 17, "emoji": "🟠", "range": (15, 20)},
+            3: {"name": "Оскорбления (тяжёлые)", "base": 35, "emoji": "🔴", "range": (25, 50)}
+        },
+        10: {
+            1: {"name": "Нарушение в строю (незнач.)", "base": 4, "emoji": "🟢", "range": (3, 5)},
+            2: {"name": "Нарушение в строю (среднее)", "base": 12, "emoji": "🟡", "range": (10, 15)},
+            3: {"name": "Нарушение в строю (грубое)", "base": 25, "emoji": "🔴", "range": (20, 30)}
+        },
+        11: {"name": "Оскорбление руководства", "base": 50, "emoji": "1️⃣1️⃣", "range": None},
+        12: {"name": "Продажа экипировки из казны", "base": 50, "emoji": "1️⃣2️⃣", "range": None},
+        13: {"name": "Провокация войны", "base": 50, "emoji": "1️⃣3️⃣", "range": None},
+        14: {"name": "Умышленное убийство союзника", "base": 50, "emoji": "1️⃣4️⃣", "range": None},
+        15: {"name": "Шпионство/слив данных", "base": 0, "emoji": "1️⃣5️⃣", "range": None},
+        16: {"name": "Скам игрока", "base": 0, "emoji": "1️⃣6️⃣", "range": None}
     }
-    return punkte.get(punkt_num, {"name": "Неизвестно", "base": 0, "emoji": "❓"})
+    if punkt_num in [9, 10]:
+        return punkte[punkt_num].get(sub_num, {"name": "Неизвестно", "base": 0, "emoji": "❓", "range": None})
+    return punkte.get(punkt_num, {"name": "Неизвестно", "base": 0, "emoji": "❓", "range": None})
 
 def show_player_fines_for_pay(cid, user_id, first_name):
     fines = get_unpaid_fines_by_user(user_id)
@@ -214,11 +257,12 @@ def show_player_fines_for_pay(cid, user_id, first_name):
         return
     
     text = f"💰 <b>ШТРАФЫ {first_name}</b>\n\n"
-    for fine_id, amount, reason, date in fines:
-        text += f"• #{fine_id} — {amount} г\n  📝 {reason}\n  📅 {date}\n\n"
+    for fine_id, amount, reason, date, overdue in fines:
+        overdue_text = f" + {overdue*10}г просрочка" if overdue > 0 else ""
+        text += f"• #{fine_id} — {amount} г{overdue_text}\n  📝 {reason}\n  📅 {date}\n\n"
     
     kb = {"inline_keyboard": []}
-    for fine_id, amount, reason, date in fines:
+    for fine_id, amount, reason, date, overdue in fines:
         kb["inline_keyboard"].append([{"text": f"✅ Оплатить #{fine_id} ({amount} г)", "callback_data": f"pay_fine_id_{fine_id}"}])
     kb["inline_keyboard"].append([{"text": "🔙 Назад", "callback_data": "back_admin"}])
     
@@ -395,6 +439,37 @@ def handle(update):
                 send(cid, f"❌ Игрок <b>{name}</b> не найден!")
             del state[uid]
             return
+        
+        if uid in state and state[uid].get("step") == "fine_amount":
+            if not is_admin(uid):
+                send(cid, "⛔ Только админ!")
+                del state[uid]
+                return
+            try:
+                amount = int(t)
+                punkt_num = state[uid]["punkt_num"]
+                sub_num = state[uid].get("sub_num", 0)
+                punkt_info = get_punkt_info(punkt_num, sub_num)
+                if punkt_info.get("range"):
+                    min_amt, max_amt = punkt_info["range"]
+                    if amount < min_amt or amount > max_amt:
+                        send(cid, f"❌ Сумма должна быть от {min_amt} до {max_amt} г! Попробуй снова:")
+                        return
+                name = state[uid]["fine_name"]
+                cursor.execute("SELECT user_id, username, first_name FROM users WHERE first_name = ? OR username = ?", (name, name.replace("@", "")))
+                r = cursor.fetchone()
+                if not r:
+                    send(cid, f"❌ Игрок <b>{name}</b> не найден!")
+                    del state[uid]
+                    return
+                user_id, username_db, first_name = r
+                reason = f"Пункт {punkt_num}: {punkt_info['name']} ({amount} г)"
+                add_fine(user_id, username_db, first_name, amount, reason)
+                send(cid, f"✅ Штраф назначен!\n\n{punkt_info['emoji']} {mention(user_id, username_db, first_name)}\n💰 {amount} г\n📝 {reason}")
+                del state[uid]
+            except:
+                send(cid, "❌ Введи число! Например: 15")
+            return
     
     if "callback_query" in update:
         c = update["callback_query"]
@@ -409,9 +484,10 @@ def handle(update):
                 return
             text = "💰 <b>ВАШИ ШТРАФЫ</b>\n\n"
             total = 0
-            for fine_id, amount, reason, date, paid in fines:
+            for fine_id, amount, reason, date, paid, overdue in fines:
                 status = "✅ Оплачен" if paid else "❌ Не оплачен"
-                text += f"• #{fine_id} — {amount} г ({status})\n  📝 {reason}\n  📅 {date}\n"
+                overdue_text = f" + {overdue*10}г просрочка" if overdue > 0 else ""
+                text += f"• #{fine_id} — {amount} г{overdue_text} ({status})\n  📝 {reason}\n  📅 {date}\n"
                 total += amount if not paid else 0
             text += f"\n<b>Всего к оплате: {total} г</b>"
             send(cid, text)
@@ -426,6 +502,10 @@ def handle(update):
                 send(cid, "👑 <b>АДМИН-ПАНЕЛЬ</b>\n\nВыбери действие:", admin_menu())
             else:
                 send(cid, "📋 <b>ПАНЕЛЬ ИГРОКА</b>\n\nТы можешь смотреть свои штрафы и отчёты:", player_menu())
+            return
+        
+        if data == "back_medium":
+            send(cid, "🟡 <b>СРЕДНИЕ ШТРАФЫ (15-25 г)</b>\n\nВыбери пункт:", medium_fines_menu())
             return
         
         if not is_admin(uid):
@@ -500,9 +580,36 @@ def handle(update):
             send(cid, "⚔️ <b>ВЫБЕРИ КАТЕГОРИЮ ШТРАФА:</b>", fine_category_menu())
             return
         
+        if data.startswith("fine_9_"):
+            sub_num = int(data.split("_")[2])
+            punkt_info = get_punkt_info(9, sub_num)
+            min_amt, max_amt = punkt_info["range"]
+            state[uid]["punkt_num"] = 9
+            state[uid]["sub_num"] = sub_num
+            state[uid]["step"] = "fine_amount"
+            send(cid, f"{punkt_info['emoji']} <b>{punkt_info['name']}</b>\n\n💰 Введи сумму штрафа от <b>{min_amt}</b> до <b>{max_amt}</b> г:")
+            return
+        
+        if data.startswith("fine_10_"):
+            sub_num = int(data.split("_")[2])
+            punkt_info = get_punkt_info(10, sub_num)
+            min_amt, max_amt = punkt_info["range"]
+            state[uid]["punkt_num"] = 10
+            state[uid]["sub_num"] = sub_num
+            state[uid]["step"] = "fine_amount"
+            send(cid, f"{punkt_info['emoji']} <b>{punkt_info['name']}</b>\n\n💰 Введи сумму штрафа от <b>{min_amt}</b> до <b>{max_amt}</b> г:")
+            return
+        
         if data.startswith("fine_"):
             punkt_num = int(data.split("_")[1])
             punkt_info = get_punkt_info(punkt_num)
+            
+            if punkt_num in [9, 10]:
+                if punkt_num == 9:
+                    send(cid, "🟡 <b>ОСКОРБЛЕНИЯ</b>\n\nВыбери степень тяжести:", fine_9_submenu())
+                else:
+                    send(cid, "🔟 <b>НАРУШЕНИЕ В СТРОЮ</b>\n\nВыбери степень тяжести:", fine_10_submenu())
+                return
             
             if "fine_name" not in state.get(uid, {}):
                 send(cid, "❌ Ошибка! Сначала выбери игрока.")
@@ -570,16 +677,17 @@ def handle(update):
             return
 
 def show_all_fines(cid):
-    cursor.execute("SELECT id, user_id, username, first_name, amount, reason, date, paid FROM fines ORDER BY date DESC LIMIT 30")
+    cursor.execute("SELECT id, user_id, username, first_name, amount, reason, date, paid, overdue FROM fines ORDER BY date DESC LIMIT 30")
     fines = cursor.fetchall()
     if not fines:
         send(cid, "💰 Нет штрафов.")
         return
     text = "💰 <b>ВСЕ ШТРАФЫ</b>\n\n"
-    for fine_id, user_id, username_db, first_name, amount, reason, date, paid in fines:
+    for fine_id, user_id, username_db, first_name, amount, reason, date, paid, overdue in fines:
         name = mention(user_id, username_db, first_name)
         status = "✅" if paid else "❌"
-        text += f"• #{fine_id} {name} — {amount} г {status}\n  📝 {reason}\n  📅 {date}\n"
+        overdue_text = f" +{overdue*10}г просрочка" if overdue > 0 else ""
+        text += f"• #{fine_id} {name} — {amount} г{overdue_text} {status}\n  📝 {reason}\n  📅 {date}\n"
     send(cid, text)
 
 def show_clan_list(cid):
@@ -649,6 +757,7 @@ def main():
     offset = 0
     while True:
         try:
+            check_overdue_fines()
             r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates", params={"offset": offset, "timeout": 30})
             data = r.json()
             for u in data.get("result", []):
