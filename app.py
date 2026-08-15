@@ -11,7 +11,7 @@ CREATOR_ID = 1462367346
 conn = sqlite3.connect("attendance.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, last_seen TEXT, warnings INTEGER DEFAULT 0, missed_gatherings INTEGER DEFAULT 0)")
+cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, first_name TEXT, last_seen TEXT, warnings INTEGER DEFAULT 0, missed_gatherings INTEGER DEFAULT 0)")
 cursor.execute("CREATE TABLE IF NOT EXISTS attendance (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, present TEXT, absent TEXT, fines TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS fines (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, first_name TEXT, amount INTEGER, reason TEXT, date TEXT, paid INTEGER DEFAULT 0, overdue INTEGER DEFAULT 0)")
 cursor.execute("CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY, username TEXT)")
@@ -302,8 +302,16 @@ def handle(update):
                         first_name = name.replace(p, "").strip()
                 if not first_name:
                     first_name = username_db
-            cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name, last_seen) VALUES (?, ?, ?, ?)", 
-                           (0, username_db, first_name, datetime.now().strftime("%d.%m.%Y")))
+            
+            cursor.execute("SELECT user_id FROM users WHERE username = ? OR first_name = ?", (username_db, first_name))
+            existing = cursor.fetchone()
+            if existing:
+                send(cid, f"⚠️ Игрок <b>{first_name}</b> уже есть в базе!")
+                del state[uid]
+                return
+            
+            cursor.execute("INSERT INTO users (username, first_name, last_seen) VALUES (?, ?, ?)", 
+                           (username_db, first_name, datetime.now().strftime("%d.%m.%Y")))
             conn.commit()
             send(cid, f"✅ Игрок <b>{first_name}</b> добавлен в клан!")
             del state[uid]
