@@ -705,11 +705,10 @@ def show_clan_list(cid):
         return
     text = "👥 <b>СПИСОК КЛАНА</b>\n\n"
     for user_id, username_db, first_name, warnings, missed in members:
-        name = mention(user_id, username_db, first_name)
         if username_db:
-            text += f"• {name} (@{username_db})"
+            text += f"• @{username_db} ({first_name})"
         else:
-            text += f"• {name}"
+            text += f"• {first_name}"
         if warnings > 0:
             text += f" ⚠️{warnings}"
         if missed > 0:
