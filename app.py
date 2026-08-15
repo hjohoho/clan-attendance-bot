@@ -46,7 +46,7 @@ def mention(user_id, username, name):
     return name
 
 def get_members():
-    cursor.execute("SELECT user_id, username, first_name, last_seen, warnings, missed_gatherings FROM users")
+    cursor.execute("SELECT user_id, username, first_name, warnings, missed_gatherings FROM users")
     return cursor.fetchall()
 
 def add_fine(user_id, username, first_name, amount, reason):
@@ -704,12 +704,11 @@ def show_clan_list(cid):
         send(cid, "👥 Список клана пуст.")
         return
     text = "👥 <b>СПИСОК КЛАНА</b>\n\n"
-    for user_id, username_db, first_name, last_seen, warnings, missed in members:
+    for user_id, username_db, first_name, warnings, missed in members:
         name = mention(user_id, username_db, first_name)
-        last = f" (последний раз: {last_seen})" if last_seen else ""
         warn = f" ⚠️{warnings}" if warnings > 0 else ""
         missed_text = f" 📝{missed}" if missed > 0 else ""
-        text += f"• {name}{last}{warn}{missed_text}\n"
+        text += f"• {name}{warn}{missed_text}\n"
     send(cid, text)
 
 def show_gathering_reports(cid):
