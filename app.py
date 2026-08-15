@@ -706,9 +706,15 @@ def show_clan_list(cid):
     text = "👥 <b>СПИСОК КЛАНА</b>\n\n"
     for user_id, username_db, first_name, warnings, missed in members:
         name = mention(user_id, username_db, first_name)
-        warn = f" ⚠️{warnings}" if warnings > 0 else ""
-        missed_text = f" 📝{missed}" if missed > 0 else ""
-        text += f"• {name}{warn}{missed_text}\n"
+        if username_db:
+            text += f"• {name} (@{username_db})"
+        else:
+            text += f"• {name}"
+        if warnings > 0:
+            text += f" ⚠️{warnings}"
+        if missed > 0:
+            text += f" 📝{missed}"
+        text += "\n"
     send(cid, text)
 
 def show_gathering_reports(cid):
