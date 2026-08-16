@@ -273,57 +273,87 @@ def show_player_fines_for_pay(cid, user_id, first_name):
     
     send(cid, text, kb)
 
-# ==================== ДОБАВЛЕНИЕ ИГРОКОВ СПИСКОМ ====================
-
 def add_players_from_text(cid, text, admin_id):
     if not is_admin(admin_id):
         send(cid, "⛔ Только админ!", main_menu_kb())
         return
     
-    # Разбиваем по запятой или по новой строке
     lines = text.replace('\n', ',').split(',')
-    names = [x.strip() for x in lines if x.strip()]
+    items = [x.strip() for x in lines if x.strip()]
     
-    if not names:
-        send(cid, "❌ Ни одного имени не найдено!", main_menu_kb())
+    if not items:
+        send(cid, "❌ Ни одного игрока не найдено!", main_menu_kb())
         return
     
     added = []
     skipped = []
+    errors = []
     
-    for name in names:
+    for item in items:
+        parts = item.split(maxsplit=1)
+        user_id = None
         username_db = None
-        first_name = name
-        if "@" in name:
-            parts = name.split()
-            for p in parts:
+        first_name = item
+        
+        if parts and parts[0].isdigit():
+            user_id = int(parts[0])
+            if len(parts) > 1:
+                first_name = parts[1]
+            else:
+                cursor.execute("SELECT first_name FROM users WHERE user_id = ?", (user_id,))
+                r = cursor.fetchone()
+                if r:
+                    first_name = r[0]
+                else:
+                    first_name = f"ID{user_id}"
+        elif parts and parts[0].startswith("@"):
+            username_db = parts[0].replace("@", "")
+            if len(parts) > 1:
+                first_name = parts[1]
+            else:
+                first_name = username_db
+        elif "@" in item:
+            for p in item.split():
                 if p.startswith("@"):
                     username_db = p.replace("@", "")
-                    first_name = name.replace(p, "").strip()
-            if not first_name:
-                first_name = username_db
+                    first_name = item.replace(p, "").strip()
+                    if not first_name:
+                        first_name = username_db
+                    break
         
-        # Проверяем, есть ли уже
-        cursor.execute("SELECT user_id FROM users WHERE username = ? OR first_name = ?", (username_db, first_name))
+        if user_id:
+            cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+        elif username_db:
+            cursor.execute("SELECT user_id FROM users WHERE username = ?", (username_db,))
+        else:
+            cursor.execute("SELECT user_id FROM users WHERE first_name = ?", (first_name,))
+        
         existing = cursor.fetchone()
         if existing:
-            skipped.append(f"{name} (уже есть)")
+            skipped.append(f"{item} (уже есть)")
             continue
         
-        cursor.execute("INSERT INTO users (username, first_name, last_seen) VALUES (?, ?, ?)", 
-                       (username_db, first_name, datetime.now().strftime("%d.%m.%Y")))
-        conn.commit()
-        added.append(first_name)
+        try:
+            if user_id:
+                cursor.execute("INSERT INTO users (user_id, username, first_name, last_seen) VALUES (?, ?, ?, ?)", 
+                               (user_id, username_db, first_name, datetime.now().strftime("%d.%m.%Y")))
+            else:
+                cursor.execute("INSERT INTO users (username, first_name, last_seen) VALUES (?, ?, ?)", 
+                               (username_db, first_name, datetime.now().strftime("%d.%m.%Y")))
+            conn.commit()
+            added.append(first_name)
+        except Exception as e:
+            errors.append(f"{item} ({str(e)})")
     
     msg = f"✅ Добавлено игроков: {len(added)}\n"
     if added:
         msg += f"📋 {', '.join(added)}\n"
     if skipped:
-        msg += f"⚠️ Пропущено: {', '.join(skipped)}"
+        msg += f"⚠️ Пропущено: {', '.join(skipped)}\n"
+    if errors:
+        msg += f"❌ Ошибки: {', '.join(errors)}"
     
     send(cid, msg, main_menu_kb())
-
-# ==================== ОСНОВНОЙ КОД ====================
 
 def handle(update):
     global state
@@ -343,7 +373,6 @@ def handle(update):
                 send(cid, "📋 <b>ПАНЕЛЬ ИГРОКА</b>\n\nТы можешь смотреть свои штрафы и отчёты:", player_menu())
             return
         
-        # ===== ДОБАВЛЕНИЕ ИГРОКОВ СПИСКОМ =====
         if uid in state and state[uid].get("step") == "add_player":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -558,7 +587,7 @@ def handle(update):
         
         if data == "add_player":
             state[uid] = {"step": "add_player"}
-            send(cid, "➕ <b>ДОБАВИТЬ ИГРОКОВ</b>\n\nВведи имена через запятую (можно с @username):\nПример: Вася, @Petya, Игрок3")
+            send(cid, "➕ <b>ДОБАВИТЬ ИГРОКОВ</b>\n\nВведи имена/ID/@username через запятую:\nПример: Вася, @Petya, 123456789 Игрок3")
             return
         
         if data == "remove_player":
