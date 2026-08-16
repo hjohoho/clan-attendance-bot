@@ -46,7 +46,7 @@ def mention(user_id, username, name):
     return name
 
 def get_members():
-    cursor.execute("SELECT user_id, username, first_name, warnings, missed_gatherings FROM users")
+    cursor.execute("SELECT user_id, username, first_name FROM users")
     return cursor.fetchall()
 
 def add_fine(user_id, username, first_name, amount, reason):
@@ -436,13 +436,27 @@ def handle(update):
             del state[uid]
             return
         
+        # ===== НАЧАТЬ СБОР =====
         if uid in state and state[uid].get("step") == "present":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
                 del state[uid]
                 return
-            # Сохраняем список присутствующих
-            names = [x.strip() for x in t.split(",")]
+            
+            # Разбиваем список: по запятой, по пробелу, по новой строке
+            raw_names = t.replace('\n', ',').split(',')
+            names = []
+            for item in raw_names:
+                # Разбиваем по пробелам и убираем пустые
+                for name in item.split():
+                    if name.strip():
+                        names.append(name.strip())
+            
+            if not names:
+                send(cid, "❌ Список присутствующих пуст! Введи имена через запятую.", main_menu_kb())
+                del state[uid]
+                return
+            
             state[uid]["present"] = names
             state[uid]["step"] = "done"
             report_gathering(cid, uid)
@@ -608,7 +622,7 @@ def handle(update):
         
         if data == "start":
             state[uid] = {"step": "present", "present": []}
-            send(cid, "📝 <b>НАЧАТЬ СБОР</b>\n\nВведи список ПРИСУТСТВУЮЩИХ через запятую:")
+            send(cid, "📝 <b>НАЧАТЬ СБОР</b>\n\nВведи список ПРИСУТСТВУЮЩИХ (через запятую или пробел):")
             return
         
         if data == "inactive":
@@ -770,16 +784,11 @@ def show_clan_list(cid):
         send(cid, "👥 Список клана пуст.", main_menu_kb())
         return
     text = "👥 <b>СПИСОК КЛАНА</b>\n\n"
-    for user_id, username_db, first_name, warnings, missed in members:
+    for user_id, username_db, first_name in members:
         if username_db:
-            text += f"• @{username_db} ({first_name})"
+            text += f"• @{username_db} ({first_name})\n"
         else:
-            text += f"• {first_name}"
-        if warnings > 0:
-            text += f" ⚠️{warnings}"
-        if missed > 0:
-            text += f" 📝{missed}"
-        text += "\n"
+            text += f"• {first_name}\n"
     send(cid, text, main_menu_kb())
 
 def show_gathering_reports(cid):
@@ -815,7 +824,7 @@ def report_gathering(cid, uid):
             absent_data.append(all_users[i])
     
     fines = ""
-    for user_id, username_db, first_name, last_seen, warnings, missed in absent_data:
+    for user_id, username_db, first_name in absent_data:
         missed_count = get_missed_gatherings(user_id)
         amount = 5 + (missed_count * 10)
         reason = f"Пункт 2: Пропуск сбора (пропусков подряд: {missed_count + 1})"
