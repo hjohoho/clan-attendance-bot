@@ -441,6 +441,7 @@ def handle(update):
                 send(cid, "⛔ Только админ!", main_menu_kb())
                 del state[uid]
                 return
+            # Сохраняем список присутствующих
             names = [x.strip() for x in t.split(",")]
             state[uid]["present"] = names
             state[uid]["step"] = "done"
@@ -794,6 +795,12 @@ def show_gathering_reports(cid):
 
 def report_gathering(cid, uid):
     present = state[uid].get("present", [])
+    if not present:
+        send(cid, "❌ Список присутствующих пуст!", main_menu_kb())
+        if uid in state:
+            del state[uid]
+        return
+    
     all_users = get_members()
     
     all_names = [x[2] for x in all_users]
