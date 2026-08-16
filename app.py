@@ -46,7 +46,7 @@ def mention(user_id, username, name):
     return name
 
 def get_members():
-    cursor.execute("SELECT user_id, username, first_name FROM users")
+    cursor.execute("SELECT user_id, username, first_name, warnings, missed_gatherings FROM users")
     return cursor.fetchall()
 
 def add_fine(user_id, username, first_name, amount, reason):
@@ -55,9 +55,11 @@ def add_fine(user_id, username, first_name, amount, reason):
                        (user_id, username, first_name, amount, reason, datetime.now().strftime("%d.%m.%Y %H:%M"), 0, 0))
         conn.commit()
         fine_id = cursor.lastrowid
-        send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!")
+        # ОТПРАВКА В ЛС — ДАЖЕ ЕСЛИ НЕ ЗАПУСКАЛ БОТА
+        send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
         return fine_id
-    except:
+    except Exception as e:
+        print("Ошибка add_fine:", e)
         return None
 
 def add_warning(user_id, reason, warning_type="warning"):
@@ -436,18 +438,14 @@ def handle(update):
             del state[uid]
             return
         
-        # ===== НАЧАТЬ СБОР =====
         if uid in state and state[uid].get("step") == "present":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
                 del state[uid]
                 return
-            
-            # Разбиваем список: по запятой, по пробелу, по новой строке
             raw_names = t.replace('\n', ',').split(',')
             names = []
             for item in raw_names:
-                # Разбиваем по пробелам и убираем пустые
                 for name in item.split():
                     if name.strip():
                         names.append(name.strip())
@@ -770,12 +768,19 @@ def show_all_fines(cid):
     if not fines:
         send(cid, "💰 Нет штрафов.", main_menu_kb())
         return
+    
     text = "💰 <b>ВСЕ ШТРАФЫ</b>\n\n"
     for fine_id, user_id, username_db, first_name, amount, reason, date, paid, overdue in fines:
-        name = mention(user_id, username_db, first_name)
+        # ОТОБРАЖАЕМ И НИК, И ЮЗ
+        if username_db:
+            name_display = f"@{username_db} ({first_name})"
+        else:
+            name_display = first_name
+        
         status = "✅" if paid else "❌"
         overdue_text = f" +{overdue*10}г просрочка" if overdue > 0 else ""
-        text += f"• #{fine_id} {name} — {amount} г{overdue_text} {status}\n  📝 {reason}\n  📅 {date}\n"
+        text += f"• #{fine_id} {name_display} — {amount} г{overdue_text} {status}\n  📝 {reason}\n  📅 {date}\n"
+    
     send(cid, text, main_menu_kb())
 
 def show_clan_list(cid):
@@ -783,12 +788,21 @@ def show_clan_list(cid):
     if not members:
         send(cid, "👥 Список клана пуст.", main_menu_kb())
         return
+    
     text = "👥 <b>СПИСОК КЛАНА</b>\n\n"
-    for user_id, username_db, first_name in members:
+    for user_id, username_db, first_name, warnings, missed in members:
+        # ОТОБРАЖАЕМ И НИК, И ЮЗ
         if username_db:
-            text += f"• @{username_db} ({first_name})\n"
+            text += f"• @{username_db} ({first_name})"
         else:
-            text += f"• {first_name}\n"
+            text += f"• {first_name}"
+        
+        if warnings > 0:
+            text += f" ⚠️{warnings}"
+        if missed > 0:
+            text += f" 📝{missed}"
+        text += "\n"
+    
     send(cid, text, main_menu_kb())
 
 def show_gathering_reports(cid):
