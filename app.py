@@ -55,8 +55,16 @@ def add_fine(user_id, username, first_name, amount, reason):
                        (user_id, username, first_name, amount, reason, datetime.now().strftime("%d.%m.%Y %H:%M"), 0, 0))
         conn.commit()
         fine_id = cursor.lastrowid
-        # ОТПРАВКА В ЛС — ДАЖЕ ЕСЛИ НЕ ЗАПУСКАЛ БОТА
-        send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
+        
+        # Отправка игроку в ЛС
+        try:
+            send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
+        except:
+            print(f"Не удалось отправить штраф пользователю {user_id}")
+        
+        # Отправка админу
+        send(CREATOR_ID, f"📢 <b>ВЫПИСАН ШТРАФ!</b>\n\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г\n📝 {reason}")
+        
         return fine_id
     except Exception as e:
         print("Ошибка add_fine:", e)
@@ -771,7 +779,6 @@ def show_all_fines(cid):
     
     text = "💰 <b>ВСЕ ШТРАФЫ</b>\n\n"
     for fine_id, user_id, username_db, first_name, amount, reason, date, paid, overdue in fines:
-        # ОТОБРАЖАЕМ И НИК, И ЮЗ
         if username_db:
             name_display = f"@{username_db} ({first_name})"
         else:
@@ -791,7 +798,6 @@ def show_clan_list(cid):
     
     text = "👥 <b>СПИСОК КЛАНА</b>\n\n"
     for user_id, username_db, first_name, warnings, missed in members:
-        # ОТОБРАЖАЕМ И НИК, И ЮЗ
         if username_db:
             text += f"• @{username_db} ({first_name})"
         else:
