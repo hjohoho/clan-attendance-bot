@@ -80,29 +80,23 @@ def add_fine(user_id, username, first_name, amount, reason):
         fine_id = cursor.lastrowid
         
         # Отправка игроку в ЛС
+        msg_user = f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'"
         if user_id and user_id != 0:
-            try:
-                send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
-            except:
-                pass
+            send(user_id, msg_user)
         elif username:
             uid = get_user_id_by_username(username)
             if uid:
-                try:
-                    send(uid, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
-                    cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (uid, username))
-                    conn.commit()
-                except:
-                    pass
+                send(uid, msg_user)
+                cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (uid, username))
+                conn.commit()
         
-        # Отправка админам
+        # Отправка всем админам
+        msg_admin = f"📢 <b>ВЫПИСАН ШТРАФ!</b>\n\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г\n📝 {reason}"
         cursor.execute("SELECT user_id FROM admins")
         admins = cursor.fetchall()
         for admin in admins:
-            try:
-                send(admin[0], f"📢 <b>ВЫПИСАН ШТРАФ!</b>\n\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г\n📝 {reason}")
-            except:
-                pass
+            if admin[0] != user_id:  # не отправлять самому игроку, если он админ
+                send(admin[0], msg_admin)
         
         return fine_id
     except Exception as e:
@@ -110,17 +104,27 @@ def add_fine(user_id, username, first_name, amount, reason):
         return None
 
 def add_admin(user_id, username):
-    cursor.execute("INSERT OR IGNORE INTO admins (user_id, username) VALUES (?, ?)", (user_id, username))
-    conn.commit()
-    # Отправка уведомления новому админу
-    send(user_id, f"👑 <b>ТЫ СТАЛ АДМИНОМ!</b>\n\nТеперь ты можешь управлять кланом через /start")
-    return True
+    # Если user_id нет, получить по username
+    if not user_id or user_id == 0:
+        if username:
+            uid = get_user_id_by_username(username)
+            if uid:
+                user_id = uid
+                cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (user_id, username))
+                conn.commit()
+    if user_id and user_id != 0:
+        cursor.execute("INSERT OR IGNORE INTO admins (user_id, username) VALUES (?, ?)", (user_id, username))
+        conn.commit()
+        send(user_id, f"👑 <b>ТЫ СТАЛ АДМИНОМ!</b>\n\nТеперь ты можешь управлять кланом через /start")
+        return True
+    return False
 
 def remove_admin(user_id):
     if user_id == CREATOR_ID:
         return False
     cursor.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
     conn.commit()
+    send(user_id, f"❌ <b>ТЫ БОЛЬШЕ НЕ АДМИН!</b>")
     return True
 
 def add_warning(user_id, reason, warning_type="warning"):
@@ -463,9 +467,18 @@ def handle(update):
             r = cursor.fetchone()
             if r:
                 user_id = r[0]
-                add_admin(user_id, username_db)
-                send(cid, f"✅ <b>@{username_db}</b> теперь админ!", main_menu_kb())
-                send(user_id, f"👑 <b>ТЫ СТАЛ АДМИНОМ В КЛАНЕ!</b>\n\nТеперь ты можешь управлять кланом через /start")
+                # Если user_id нет или 0, пробуем получить по username
+                if not user_id or user_id == 0:
+                    uid_from_api = get_user_id_by_username(username_db)
+                    if uid_from_api:
+                        user_id = uid_from_api
+                        cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (user_id, username_db))
+                        conn.commit()
+                if user_id and user_id != 0:
+                    add_admin(user_id, username_db)
+                    send(cid, f"✅ <b>@{username_db}</b> теперь админ!", main_menu_kb())
+                else:
+                    send(cid, f"❌ Не удалось получить ID для @{username_db}. Попроси нажать /start.", main_menu_kb())
             else:
                 send(cid, f"❌ @{username_db} не найден в базе игроков! Сначала добавь его через /add", main_menu_kb())
             del state[uid]
@@ -486,7 +499,6 @@ def handle(update):
                 else:
                     remove_admin(user_id)
                     send(cid, f"❌ <b>@{username_db}</b> больше не админ!", main_menu_kb())
-                    send(user_id, f"❌ <b>ТЫ БОЛЬШЕ НЕ АДМИН!</b>")
             else:
                 send(cid, f"❌ Админ @{username_db} не найден!", main_menu_kb())
             del state[uid]
