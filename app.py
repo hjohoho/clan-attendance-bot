@@ -11,7 +11,7 @@ CREATOR_ID = 1462367346
 conn = sqlite3.connect("attendance.db", check_same_thread=False)
 cursor = conn.cursor()
 
-cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, first_name TEXT, last_seen TEXT, warnings INTEGER DEFAULT 0, missed_gatherings INTEGER DEFAULT 0)")
+cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, last_seen TEXT, warnings INTEGER DEFAULT 0, missed_gatherings INTEGER DEFAULT 0)")
 cursor.execute("CREATE TABLE IF NOT EXISTS attendance (id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT, present TEXT, absent TEXT, fines TEXT)")
 cursor.execute("CREATE TABLE IF NOT EXISTS fines (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, first_name TEXT, amount INTEGER, reason TEXT, date TEXT, paid INTEGER DEFAULT 0, overdue INTEGER DEFAULT 0)")
 cursor.execute("CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY, username TEXT)")
@@ -49,18 +49,50 @@ def get_members():
     cursor.execute("SELECT user_id, username, first_name, warnings, missed_gatherings FROM users")
     return cursor.fetchall()
 
+def get_user_id_by_username(username):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getChat"
+    data = {"chat_id": f"@{username}"}
+    try:
+        r = requests.post(url, json=data, timeout=10)
+        result = r.json()
+        if result.get("ok"):
+            return result["result"]["id"]
+        else:
+            return None
+    except:
+        return None
+
 def add_fine(user_id, username, first_name, amount, reason):
     try:
+        # Если нет user_id или он 0, пробуем получить по username
+        if not user_id or user_id == 0:
+            if username:
+                user_id = get_user_id_by_username(username)
+                if user_id:
+                    cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (user_id, username))
+                    conn.commit()
+        
         cursor.execute("INSERT INTO fines (user_id, username, first_name, amount, reason, date, paid, overdue) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
                        (user_id, username, first_name, amount, reason, datetime.now().strftime("%d.%m.%Y %H:%M"), 0, 0))
         conn.commit()
         fine_id = cursor.lastrowid
         
-        # Отправка игроку в ЛС
-        try:
-            send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
-        except:
-            print(f"Не удалось отправить штраф пользователю {user_id}")
+        # Отправка игроку в ЛС (по user_id или username)
+        if user_id and user_id != 0:
+            try:
+                send(user_id, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
+            except:
+                pass
+        elif username:
+            # Пробуем отправить по username через упоминание в чате
+            try:
+                user_id_from_api = get_user_id_by_username(username)
+                if user_id_from_api:
+                    send(user_id_from_api, f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n⏰ Штраф нужно оплатить в течение 2 дней!\n\nДля оплаты нажми /start и выбери 'Мои штрафы'")
+                    cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (user_id_from_api, username))
+                    conn.commit()
+            except:
+                pass
         
         # Отправка админу
         send(CREATOR_ID, f"📢 <b>ВЫПИСАН ШТРАФ!</b>\n\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г\n📝 {reason}")
