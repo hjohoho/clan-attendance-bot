@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 BOT_TOKEN = "8975094107:AAHAyExCPty9LsFavS1u2b31Od4sGYbrNkg"
 ADMIN_IDS = [1462367346, 8785617232]
 CREATOR_ID = 1462367346
+THREAD_ID = 17405
 
 conn = sqlite3.connect("attendance.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -34,9 +35,19 @@ def send(chat_id, text, kb=None):
     if not chat_id or chat_id == 0:
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "message_thread_id": THREAD_ID}
     if kb:
         data["reply_markup"] = json.dumps(kb)
+    try:
+        requests.post(url, json=data, timeout=10)
+    except:
+        pass
+
+def send_dm(user_id, text):
+    if not user_id or user_id == 0:
+        return
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {"chat_id": user_id, "text": text, "parse_mode": "HTML"}
     try:
         requests.post(url, json=data, timeout=10)
     except:
@@ -80,28 +91,28 @@ def add_fine(user_id, username, first_name, amount, reason):
         
         msg = f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         if user_id and user_id != 0:
-            send(user_id, msg)
+            send_dm(user_id, msg)
         elif username:
             uid = get_user_id_by_username(username)
             if uid:
-                send(uid, msg)
+                send_dm(uid, msg)
                 cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (uid, username))
                 conn.commit()
         
         cursor.execute("SELECT user_id FROM admins")
         for admin in cursor.fetchall():
             if admin[0] != user_id:
-                send(admin[0], f"📢 <b>ШТРАФ</b>\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г")
+                send_dm(admin[0], f"📢 <b>ШТРАФ</b>\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г")
         
         return fine_id
     except Exception as e:
-        print("Ошибка:", e)
+        print("Ошибка add_fine:", e)
         return None
 
 def add_admin(user_id, username):
     cursor.execute("INSERT OR IGNORE INTO admins (user_id, username) VALUES (?, ?)", (user_id, username))
     conn.commit()
-    send(user_id, f"👑 <b>ТЫ СТАЛ АДМИНОМ!</b>")
+    send_dm(user_id, f"👑 <b>ТЫ СТАЛ АДМИНОМ!</b>")
     return True
 
 def remove_admin(user_id):
@@ -109,7 +120,7 @@ def remove_admin(user_id):
         return False
     cursor.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
     conn.commit()
-    send(user_id, f"❌ <b>ТЫ БОЛЬШЕ НЕ АДМИН!</b>")
+    send_dm(user_id, f"❌ <b>ТЫ БОЛЬШЕ НЕ АДМИН!</b>")
     return True
 
 def add_warning(user_id, reason, warning_type="warning"):
@@ -174,7 +185,7 @@ def check_overdue_fines():
                 cursor.execute("SELECT user_id, username, first_name FROM users WHERE user_id = ?", (user_id,))
                 user = cursor.fetchone()
                 if user:
-                    send(user_id, f"⏰ <b>ПРОСРОЧКА</b>\n💰 Штраф #{fine_id} просрочен!\n➕ {extra_amount} г")
+                    send_dm(user_id, f"⏰ <b>ПРОСРОЧКА</b>\n💰 Штраф #{fine_id} просрочен!\n➕ {extra_amount} г")
 
 state = {}
 
@@ -714,7 +725,7 @@ def handle(update):
             if punkt_num in [15, 16]:
                 reason = f"Пункт {punkt_num}: {punkt_info['name']} - ЧС+КИК!"
                 add_warning(user_id, reason, "cs")
-                send(user_id, f"⛔ ВЫ ИСКЛЮЧЕНЫ!\n{reason}")
+                send_dm(user_id, f"⛔ ВЫ ИСКЛЮЧЕНЫ!\n{reason}")
                 send(cid, f"⛔ {first_name} ИСКЛЮЧЕН!", main_menu_kb())
                 remove_player_from_db(user_id)
                 del state[uid]
@@ -800,6 +811,7 @@ def report_gathering(cid, uid):
 
 def main():
     print("🤖 БОТ ЗАПУЩЕН!")
+    print(f"📌 Топик: {THREAD_ID}")
     offset = 0
     while True:
         try:
