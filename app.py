@@ -5,7 +5,6 @@ import time
 from datetime import datetime, timedelta
 
 BOT_TOKEN = "8975094107:AAHAyExCPty9LsFavS1u2b31Od4sGYbrNkg"
-ADMIN_IDS = [1462367346, 8785617232]
 CREATOR_ID = 1462367346
 THREAD_ID = 17405
 
@@ -21,8 +20,6 @@ conn.commit()
 
 cursor.execute("INSERT OR IGNORE INTO users (user_id, username, first_name) VALUES (?, ?, ?)", (CREATOR_ID, "PD777DP", "виджет"))
 cursor.execute("INSERT OR IGNORE INTO admins (user_id, username) VALUES (?, ?)", (CREATOR_ID, "PD777DP"))
-for uid in ADMIN_IDS:
-    cursor.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (uid,))
 conn.commit()
 
 def is_admin(user_id):
@@ -89,6 +86,7 @@ def add_fine(user_id, username, first_name, amount, reason):
         conn.commit()
         fine_id = cursor.lastrowid
         
+        # ОТПРАВКА В ЛС ИГРОКУ
         msg = f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         if user_id and user_id != 0:
             send_dm(user_id, msg)
@@ -99,29 +97,38 @@ def add_fine(user_id, username, first_name, amount, reason):
                 cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (uid, username))
                 conn.commit()
         
+        # ОТПРАВКА АДМИНАМ В ЛС
         cursor.execute("SELECT user_id FROM admins")
         for admin in cursor.fetchall():
             if admin[0] != user_id:
-                send_dm(admin[0], f"📢 <b>ШТРАФ</b>\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г")
+                send_dm(admin[0], f"📢 <b>ВЫПИСАН ШТРАФ</b>\n👤 {mention(user_id, username, first_name)}\n💰 {amount} г")
         
         return fine_id
     except Exception as e:
         print("Ошибка add_fine:", e)
         return None
 
-def add_admin(user_id, username):
+def add_admin_by_username(username):
+    user_id = get_user_id_by_username(username)
+    if not user_id:
+        return False, "❌ Не найден @{username}"
     cursor.execute("INSERT OR IGNORE INTO admins (user_id, username) VALUES (?, ?)", (user_id, username))
     conn.commit()
     send_dm(user_id, f"👑 <b>ТЫ СТАЛ АДМИНОМ!</b>")
-    return True
+    return True, f"✅ @{username} теперь админ!"
 
-def remove_admin(user_id):
+def remove_admin_by_username(username):
+    cursor.execute("SELECT user_id FROM admins WHERE username = ?", (username,))
+    r = cursor.fetchone()
+    if not r:
+        return False, f"❌ Админ @{username} не найден"
+    user_id = r[0]
     if user_id == CREATOR_ID:
-        return False
+        return False, "⛔ Нельзя удалить создателя!"
     cursor.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
     conn.commit()
     send_dm(user_id, f"❌ <b>ТЫ БОЛЬШЕ НЕ АДМИН!</b>")
-    return True
+    return True, f"❌ @{username} больше не админ"
 
 def add_warning(user_id, reason, warning_type="warning"):
     cursor.execute("INSERT INTO warnings (user_id, reason, date, type) VALUES (?, ?, ?, ?)", 
@@ -162,10 +169,6 @@ def remove_player_from_db(user_id):
     conn.commit()
     return True
 
-def get_admins():
-    cursor.execute("SELECT user_id, username FROM admins")
-    return cursor.fetchall()
-
 def check_overdue_fines():
     cursor.execute("SELECT id, user_id, amount, date FROM fines WHERE paid = 0")
     fines = cursor.fetchall()
@@ -204,9 +207,7 @@ def admin_menu():
         [{"text": "✅ Оплатить штраф", "callback_data": "pay_fine"}],
         [{"text": "📊 Отчёты по сборам", "callback_data": "report"}],
         [{"text": "💰 Все штрафы", "callback_data": "fines"}],
-        [{"text": "👥 Список клана", "callback_data": "list"}],
-        [{"text": "👑 Добавить админа", "callback_data": "add_admin"}],
-        [{"text": "👑 Удалить админа", "callback_data": "remove_admin"}]
+        [{"text": "👥 Список клана", "callback_data": "list"}]
     ]}
 
 def player_menu():
@@ -365,6 +366,116 @@ def handle(update):
                 send(cid, "📋 <b>ПАНЕЛЬ ИГРОКА</b>", player_menu())
             return
         
+        # ===== ДОБАВЛЕНИЕ АДМИНА ЧЕРЕЗ КОМАНДУ =====
+        if t.startswith("/addadmin"):
+            if not is_admin(uid):
+                send(cid, "⛔ Только админ!", main_menu_kb())
+                return
+            parts = t.split()
+            if len(parts) < 2:
+                send(cid, "❌ /addadmin @username", main_menu_kb())
+                return
+            username = parts[1].replace("@", "")
+            success, msg = add_admin_by_username(username)
+            send(cid, msg, main_menu_kb())
+            return
+        
+        # ===== УДАЛЕНИЕ АДМИНА ЧЕРЕЗ КОМАНДУ =====
+        if t.startswith("/removeadmin"):
+            if not is_admin(uid):
+                send(cid, "⛔ Только админ!", main_menu_kb())
+                return
+            parts = t.split()
+            if len(parts) < 2:
+                send(cid, "❌ /removeadmin @username", main_menu_kb())
+                return
+            username = parts[1].replace("@", "")
+            success, msg = remove_admin_by_username(username)
+            send(cid, msg, main_menu_kb())
+            return
+        
+        # ===== ВЫПИСАТЬ ШТРАФ ЧЕРЕЗ КОМАНДУ =====
+        if t.startswith("/fine"):
+            if not is_admin(uid):
+                send(cid, "⛔ Только админ!", main_menu_kb())
+                return
+            parts = t.split()
+            if len(parts) < 3:
+                send(cid, "❌ /fine @username 10 причина", main_menu_kb())
+                return
+            username = parts[1].replace("@", "")
+            try:
+                amount = int(parts[2])
+            except:
+                send(cid, "❌ Сумма должна быть числом", main_menu_kb())
+                return
+            reason = " ".join(parts[3:]) if len(parts) > 3 else "Нарушение"
+            
+            cursor.execute("SELECT user_id, first_name FROM users WHERE username = ?", (username,))
+            r = cursor.fetchone()
+            if not r:
+                send(cid, f"❌ Игрок @{username} не найден", main_menu_kb())
+                return
+            user_id, first_name = r
+            add_fine(user_id, username, first_name, amount, reason)
+            send(cid, f"✅ Штраф {amount}г для @{username} выписан!", main_menu_kb())
+            return
+        
+        # ===== МОИ ШТРАФЫ ЧЕРЕЗ КОМАНДУ =====
+        if t == "/myfines":
+            fines = get_fines_by_user(uid)
+            if not fines:
+                send(cid, "💰 У вас нет штрафов", player_menu())
+                return
+            text = "💰 <b>ВАШИ ШТРАФЫ</b>\n\n"
+            total = 0
+            for fine_id, amount, reason, date, paid, overdue in fines:
+                status = "✅" if paid else "❌"
+                overdue_text = f" +{overdue*10}г" if overdue > 0 else ""
+                text += f"• #{fine_id} — {amount} г{overdue_text} ({status})\n  📝 {reason}\n  📅 {date}\n"
+                total += amount if not paid else 0
+            text += f"\n<b>К оплате: {total} г</b>"
+            send(cid, text, player_menu())
+            return
+        
+        # ===== ВСЕ ШТРАФЫ ЧЕРЕЗ КОМАНДУ =====
+        if t == "/fines":
+            if not is_admin(uid):
+                send(cid, "⛔ Только админ!", main_menu_kb())
+                return
+            cursor.execute("SELECT id, user_id, username, first_name, amount, reason, date, paid, overdue FROM fines ORDER BY date DESC LIMIT 30")
+            fines = cursor.fetchall()
+            if not fines:
+                send(cid, "💰 Нет штрафов", main_menu_kb())
+                return
+            text = "💰 <b>ВСЕ ШТРАФЫ</b>\n\n"
+            for fine_id, user_id, username, first_name, amount, reason, date, paid, overdue in fines:
+                name = f"@{username} ({first_name})" if username else first_name
+                status = "✅" if paid else "❌"
+                overdue_text = f" +{overdue*10}г" if overdue > 0 else ""
+                text += f"• #{fine_id} {name} — {amount} г{overdue_text} {status}\n  📝 {reason}\n  📅 {date}\n"
+            send(cid, text, main_menu_kb())
+            return
+        
+        # ===== СПИСОК КЛАНА =====
+        if t == "/list":
+            members = get_members()
+            if not members:
+                send(cid, "👥 Список клана пуст", main_menu_kb())
+                return
+            text = "👥 <b>СПИСОК КЛАНА</b>\n\n"
+            for user_id, username, first_name, warnings, missed in members:
+                name = f"@{username} ({first_name})" if username else first_name
+                text += f"• {name}"
+                if warnings > 0:
+                    text += f" ⚠️{warnings}"
+                if missed > 0:
+                    text += f" 📝{missed}"
+                text += "\n"
+            send(cid, text, main_menu_kb())
+            return
+        
+        # ===== ДОБАВИТЬ ИГРОКА =====
         if uid in state and state[uid].get("step") == "add_player":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -374,6 +485,7 @@ def handle(update):
             del state[uid]
             return
         
+        # ===== УДАЛИТЬ ИГРОКА =====
         if uid in state and state[uid].get("step") == "remove_player":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -393,41 +505,7 @@ def handle(update):
             del state[uid]
             return
         
-        if uid in state and state[uid].get("step") == "add_admin":
-            if not is_admin(uid):
-                send(cid, "⛔ Только админ!", main_menu_kb())
-                del state[uid]
-                return
-            username = t.replace("@", "")
-            cursor.execute("SELECT user_id FROM users WHERE username = ?", (username,))
-            r = cursor.fetchone()
-            if r:
-                add_admin(r[0], username)
-                send(cid, f"✅ @{username} теперь админ!", main_menu_kb())
-            else:
-                send(cid, f"❌ @{username} не найден", main_menu_kb())
-            del state[uid]
-            return
-        
-        if uid in state and state[uid].get("step") == "remove_admin":
-            if not is_admin(uid):
-                send(cid, "⛔ Только админ!", main_menu_kb())
-                del state[uid]
-                return
-            username = t.replace("@", "")
-            cursor.execute("SELECT user_id FROM admins WHERE username = ?", (username,))
-            r = cursor.fetchone()
-            if r:
-                if r[0] == CREATOR_ID:
-                    send(cid, "⛔ Нельзя удалить создателя!", main_menu_kb())
-                else:
-                    remove_admin(r[0])
-                    send(cid, f"❌ @{username} больше не админ", main_menu_kb())
-            else:
-                send(cid, f"❌ Админ @{username} не найден", main_menu_kb())
-            del state[uid]
-            return
-        
+        # ===== НАЧАТЬ СБОР =====
         if uid in state and state[uid].get("step") == "present":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -443,6 +521,7 @@ def handle(update):
             report_gathering(cid, uid)
             return
         
+        # ===== НЕАКТИВНЫЕ =====
         if uid in state and state[uid].get("step") == "inactive_name":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -481,6 +560,7 @@ def handle(update):
             del state[uid]
             return
         
+        # ===== НАЗНАЧИТЬ ШТРАФ =====
         if uid in state and state[uid].get("step") == "fine_name":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -490,6 +570,7 @@ def handle(update):
             send(cid, f"👤 {t}\n⚔️ Выбери категорию:", fine_category_menu())
             return
         
+        # ===== ОПЛАТИТЬ ШТРАФ =====
         if uid in state and state[uid].get("step") == "pay_name":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -505,6 +586,7 @@ def handle(update):
             del state[uid]
             return
         
+        # ===== ВВОД СУММЫ ШТРАФА =====
         if uid in state and state[uid].get("step") == "fine_amount":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -593,16 +675,6 @@ def handle(update):
         if data == "remove_player":
             state[uid] = {"step": "remove_player"}
             send(cid, "❌ Введи имя или @username")
-            return
-        
-        if data == "add_admin":
-            state[uid] = {"step": "add_admin"}
-            send(cid, "👑 Введи @username")
-            return
-        
-        if data == "remove_admin":
-            state[uid] = {"step": "remove_admin"}
-            send(cid, "👑 Введи @username")
             return
         
         if data == "start":
