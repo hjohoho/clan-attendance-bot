@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 BOT_TOKEN = "8975094107:AAHAyExCPty9LsFavS1u2b31Od4sGYbrNkg"
 CREATOR_ID = 1462367346
-THREAD_ID = 17405
 
 conn = sqlite3.connect("attendance.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -32,7 +31,7 @@ def send(chat_id, text, kb=None):
     if not chat_id or chat_id == 0:
         return
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "message_thread_id": THREAD_ID}
+    data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if kb:
         data["reply_markup"] = json.dumps(kb)
     try:
@@ -86,7 +85,6 @@ def add_fine(user_id, username, first_name, amount, reason):
         conn.commit()
         fine_id = cursor.lastrowid
         
-        # ОТПРАВКА В ЛС ИГРОКУ
         msg = f"⚠️ <b>ВЫ ПОЛУЧИЛИ ШТРАФ!</b>\n\n💰 Сумма: {amount} г\n📝 {reason}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         if user_id and user_id != 0:
             send_dm(user_id, msg)
@@ -97,7 +95,6 @@ def add_fine(user_id, username, first_name, amount, reason):
                 cursor.execute("UPDATE users SET user_id = ? WHERE username = ?", (uid, username))
                 conn.commit()
         
-        # ОТПРАВКА АДМИНАМ В ЛС
         cursor.execute("SELECT user_id FROM admins")
         for admin in cursor.fetchall():
             if admin[0] != user_id:
@@ -366,7 +363,6 @@ def handle(update):
                 send(cid, "📋 <b>ПАНЕЛЬ ИГРОКА</b>", player_menu())
             return
         
-        # ===== ДОБАВЛЕНИЕ АДМИНА ЧЕРЕЗ КОМАНДУ =====
         if t.startswith("/addadmin"):
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -380,7 +376,6 @@ def handle(update):
             send(cid, msg, main_menu_kb())
             return
         
-        # ===== УДАЛЕНИЕ АДМИНА ЧЕРЕЗ КОМАНДУ =====
         if t.startswith("/removeadmin"):
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -394,7 +389,6 @@ def handle(update):
             send(cid, msg, main_menu_kb())
             return
         
-        # ===== ВЫПИСАТЬ ШТРАФ ЧЕРЕЗ КОМАНДУ =====
         if t.startswith("/fine"):
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -421,7 +415,6 @@ def handle(update):
             send(cid, f"✅ Штраф {amount}г для @{username} выписан!", main_menu_kb())
             return
         
-        # ===== МОИ ШТРАФЫ ЧЕРЕЗ КОМАНДУ =====
         if t == "/myfines":
             fines = get_fines_by_user(uid)
             if not fines:
@@ -438,7 +431,6 @@ def handle(update):
             send(cid, text, player_menu())
             return
         
-        # ===== ВСЕ ШТРАФЫ ЧЕРЕЗ КОМАНДУ =====
         if t == "/fines":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -457,7 +449,6 @@ def handle(update):
             send(cid, text, main_menu_kb())
             return
         
-        # ===== СПИСОК КЛАНА =====
         if t == "/list":
             members = get_members()
             if not members:
@@ -475,7 +466,6 @@ def handle(update):
             send(cid, text, main_menu_kb())
             return
         
-        # ===== ДОБАВИТЬ ИГРОКА =====
         if uid in state and state[uid].get("step") == "add_player":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -485,7 +475,6 @@ def handle(update):
             del state[uid]
             return
         
-        # ===== УДАЛИТЬ ИГРОКА =====
         if uid in state and state[uid].get("step") == "remove_player":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -505,7 +494,6 @@ def handle(update):
             del state[uid]
             return
         
-        # ===== НАЧАТЬ СБОР =====
         if uid in state and state[uid].get("step") == "present":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -521,7 +509,6 @@ def handle(update):
             report_gathering(cid, uid)
             return
         
-        # ===== НЕАКТИВНЫЕ =====
         if uid in state and state[uid].get("step") == "inactive_name":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -560,7 +547,6 @@ def handle(update):
             del state[uid]
             return
         
-        # ===== НАЗНАЧИТЬ ШТРАФ =====
         if uid in state and state[uid].get("step") == "fine_name":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -570,7 +556,6 @@ def handle(update):
             send(cid, f"👤 {t}\n⚔️ Выбери категорию:", fine_category_menu())
             return
         
-        # ===== ОПЛАТИТЬ ШТРАФ =====
         if uid in state and state[uid].get("step") == "pay_name":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -586,7 +571,6 @@ def handle(update):
             del state[uid]
             return
         
-        # ===== ВВОД СУММЫ ШТРАФА =====
         if uid in state and state[uid].get("step") == "fine_amount":
             if not is_admin(uid):
                 send(cid, "⛔ Только админ!", main_menu_kb())
@@ -883,7 +867,6 @@ def report_gathering(cid, uid):
 
 def main():
     print("🤖 БОТ ЗАПУЩЕН!")
-    print(f"📌 Топик: {THREAD_ID}")
     offset = 0
     while True:
         try:
